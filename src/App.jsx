@@ -157,13 +157,22 @@ const STATIC_MENU = [
  * API trả về: [{ menuItemId, name, price, category, imageUrl, isAvailable }]
  * UI cần:    [{ id, cat, name, desc, price, imageUrl|emoji, popular, isAvailable }]
  */
+// Map enum MenuCategory (BE C# trả số) sang nhãn tiếng Việt
+const CATEGORY_LABELS = {
+  1: "Món ăn",
+  2: "Đồ uống",
+  3: "Tráng miệng",
+  4: "Combo",
+  5: "Khác",
+};
+
 function transformApiMenu(apiItems) {
   const seenCats = [];
   const catSet = new Set();
   apiItems.forEach((item) => {
     if (!catSet.has(item.category)) {
       catSet.add(item.category);
-      seenCats.push({ id: item.category, label: item.category });
+      seenCats.push({ id: item.category, label: CATEGORY_LABELS[item.category] ?? `Loại ${item.category}` });
     }
   });
 
@@ -171,7 +180,7 @@ function transformApiMenu(apiItems) {
     id:          item.menuItemId,
     cat:         item.category,
     name:        item.name,
-    desc:        "",            // API không có description
+    desc:        item.description ?? "",
     price:       item.price,
     imageUrl:    item.imageUrl ?? null,
     emoji:       null,          // không dùng emoji khi có imageUrl từ API
