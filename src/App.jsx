@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const USE_MOCK = true; // đặt false khi kết nối backend thật
+const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 // ── Order status ──────────────────────────────────────────────────────────────
