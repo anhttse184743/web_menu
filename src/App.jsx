@@ -3,10 +3,12 @@ import {
   Search, Plus, Minus, ShoppingBag, X, Check, Star,
   ChevronRight, Loader2, ClipboardList, RefreshCw,
 } from "lucide-react";
+import FoodDetailModal from "./FoodDetailModal";
+import FeedbackForm from "./FeedbackForm";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
-const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
+const API_BASE = import.meta.env.VITE_API_GATEWAY ? `${import.meta.env.VITE_API_GATEWAY}/api` : "/api";
 
 // ── Order status ──────────────────────────────────────────────────────────────
 const ORDER_STATUS = {
@@ -195,6 +197,7 @@ const formatVND = (n) => n.toLocaleString("vi-VN") + "đ";
 
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
+  const [selectedFood, setSelectedFood] = useState(null);
   const [cart, setCart]           = useState({});
   const [cartNotes, setCartNotes] = useState({}); // ghi chú riêng từng món: { [menuItemId]: string }
   const [cartOpen, setCartOpen]   = useState(false);
@@ -437,7 +440,7 @@ export default function App() {
             ) : (
               <div className="flex flex-col gap-3">
                 {filtered.map((item) => (
-                  <ItemCard key={item.id} item={item} qty={cart[item.id] || 0} onAdd={add} onRemove={remove} unavailable={unavailableIds.has(item.id)} />
+                  <ItemCard key={item.id} item={item} qty={cart[item.id] || 0} onAdd={add} onRemove={remove} unavailable={unavailableIds.has(item.id)} onSelect={() => setSelectedFood(item)} />
                 ))}
               </div>
             )}
@@ -453,7 +456,7 @@ export default function App() {
               <h2 className="font-lora text-[21px] font-semibold text-brown-900 mb-[13px]">{c.label}</h2>
               <div className="flex flex-col gap-3">
                 {activeMenu.filter((m) => m.cat === c.id).map((item) => (
-                  <ItemCard key={item.id} item={item} qty={cart[item.id] || 0} onAdd={add} onRemove={remove} unavailable={unavailableIds.has(item.id)} />
+                  <ItemCard key={item.id} item={item} qty={cart[item.id] || 0} onAdd={add} onRemove={remove} unavailable={unavailableIds.has(item.id)} onSelect={() => setSelectedFood(item)} />
                 ))}
               </div>
             </section>
@@ -646,6 +649,17 @@ export default function App() {
           onAddMore={() => setOrderSheetOpen(false)}
         />
       )}
+
+      {/* Food detail modal */}
+      {selectedFood && (
+        <FoodDetailModal
+          item={selectedFood}
+          onClose={() => setSelectedFood(null)}
+          qty={cart[selectedFood.id] || 0}
+          onAdd={() => add(selectedFood.id)}
+          onRemove={() => remove(selectedFood.id)}
+        />
+      )}
     </div>
   );
 }
@@ -669,9 +683,12 @@ function ItemThumbnail({ item, className = "w-full h-full object-cover" }) {
 }
 
 // ── ItemCard ──────────────────────────────────────────────────────────────────
-function ItemCard({ item, qty, onAdd, onRemove, unavailable }) {
+function ItemCard({ item, qty, onAdd, onRemove, unavailable, onSelect }) {
   return (
-    <article className={`flex gap-[13px] bg-white border border-line rounded-[18px] p-3 transition-[box-shadow] duration-200 hover:shadow-[0_8px_24px_rgba(58,42,30,0.07)] ${unavailable ? "opacity-60" : ""}`}>
+    <article 
+      onClick={() => onSelect && onSelect(item)}
+      className={`flex gap-[13px] bg-white border border-line rounded-[18px] p-3 transition-[box-shadow] duration-200 cursor-pointer hover:shadow-[0_8px_24px_rgba(58,42,30,0.07)] ${unavailable ? "opacity-60" : ""}`}
+    >
       {/* outer div: relative + sized, badge anchors here — NO overflow-hidden */}
       <div className="relative shrink-0 w-[84px] h-[84px]">
         {/* inner div: overflow-hidden chỉ để clip ảnh tròn góc */}
@@ -698,7 +715,7 @@ function ItemCard({ item, qty, onAdd, onRemove, unavailable }) {
           {unavailable ? null : qty === 0 ? (
             <button
               className="inline-flex items-center gap-1 bg-brown-900 text-tint text-[13.5px] font-semibold px-[14px] py-2 rounded-[11px] transition-[background] duration-200 hover:bg-brown-700 active:scale-95 cursor-pointer"
-              onClick={() => onAdd(item.id)}
+              onClick={(e) => { e.stopPropagation(); onAdd(item.id); }}
               aria-label={"Thêm " + item.name}
             >
               <Plus size={17} strokeWidth={2.6} /> Thêm
@@ -721,12 +738,12 @@ function Stepper({ qty, onAdd, onRemove, small }) {
   const lbl  = small ? "text-brown-900" : "text-tint";
 
   return (
-    <div className={base}>
-      <button className={`rounded-[8px] grid place-items-center transition-colors duration-150 cursor-pointer ${btn}`} onClick={onRemove} aria-label="Bớt">
+    <div className={base} onClick={e => e.stopPropagation()}>
+      <button className={`rounded-[8px] grid place-items-center transition-colors duration-150 cursor-pointer ${btn}`} onClick={(e) => { e.stopPropagation(); onRemove(e); }} aria-label="Bớt">
         <Minus size={small ? 14 : 16} strokeWidth={2.6} />
       </button>
       <span className={`min-w-[22px] text-center font-semibold text-[14px] ${lbl}`}>{qty}</span>
-      <button className={`rounded-[8px] grid place-items-center transition-colors duration-150 cursor-pointer ${btn}`} onClick={onAdd} aria-label="Thêm">
+      <button className={`rounded-[8px] grid place-items-center transition-colors duration-150 cursor-pointer ${btn}`} onClick={(e) => { e.stopPropagation(); onAdd(e); }} aria-label="Thêm">
         <Plus size={small ? 14 : 16} strokeWidth={2.6} />
       </button>
     </div>
@@ -832,6 +849,14 @@ function OrderSheet({ tableId, order, orderStatus, statusLoading, menuData, onCl
                 </div>
               );
             })
+          )}
+
+          {orderStatus === 4 && (
+            <FeedbackForm
+              orderId={order?.orderId}
+              tableId={tableId}
+              onSubmitSuccess={onClose}
+            />
           )}
         </div>
 
