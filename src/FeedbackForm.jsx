@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Star, Check, Loader2 } from 'lucide-react';
+import { fetchWithRetry } from './lib/fetchWithRetry';
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 const API_BASE = import.meta.env.VITE_API_GATEWAY ? `${import.meta.env.VITE_API_GATEWAY}/api` : "/api";
@@ -9,14 +10,19 @@ export default function FeedbackForm({ orderId, tableId, onSubmitSuccess }) {
   const [comment, setComment] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+  const [retryMessage, setRetryMessage] = useState("");
 
   const handleSubmit = async () => {
     setLoading(true);
+    setError("");
+    setRetryMessage("");
     try {
       if (USE_MOCK) {
         await new Promise((r) => setTimeout(r, 700));
       } else {
-        const res = await fetch(`${API_BASE}/feedbacks`, {
+        const onRetry = () => setRetryMessage("Máy chủ đang khởi động lại, vui lòng đợi trong giây lát…");
+        const res = await fetchWithRetry(`${API_BASE}/feedbacks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -25,7 +31,7 @@ export default function FeedbackForm({ orderId, tableId, onSubmitSuccess }) {
             rating,
             comment,
           }),
-        });
+        }, onRetry);
         if (!res.ok) throw new Error("Gửi đánh giá thất bại");
       }
       setSubmitted(true);
@@ -34,9 +40,10 @@ export default function FeedbackForm({ orderId, tableId, onSubmitSuccess }) {
       }
     } catch (err) {
       console.error(err);
-      alert("Có lỗi xảy ra, vui lòng thử lại sau.");
+      setError("Có lỗi xảy ra, vui lòng thử lại sau.");
     } finally {
       setLoading(false);
+      setRetryMessage("");
     }
   };
 
@@ -80,6 +87,13 @@ export default function FeedbackForm({ orderId, tableId, onSubmitSuccess }) {
         value={comment}
         onChange={(e) => setComment(e.target.value)}
       />
+
+      {retryMessage && !error && (
+        <p className="text-[13px] text-brown-700 text-center mb-3">{retryMessage}</p>
+      )}
+      {error && (
+        <p className="text-[13px] text-red-500 text-center mb-3">{error}</p>
+      )}
 
       <button
         onClick={handleSubmit}

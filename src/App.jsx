@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Search, Plus, Minus, ShoppingBag, X, Check, Star,
   ChevronRight, Loader2, ClipboardList, RefreshCw,
 } from "lucide-react";
 import FoodDetailModal from "./FoodDetailModal";
 import FeedbackForm from "./FeedbackForm";
+import { sleep, fetchWithRetry } from "./lib/fetchWithRetry";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
@@ -23,7 +24,6 @@ const ORDER_STATUS = {
 let _mockOrder = null;
 
 // ── API layer ─────────────────────────────────────────────────────────────────
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Normalise một Order response về camelCase thống nhất.
@@ -53,17 +53,17 @@ function normalizeOrder(raw) {
 }
 
 const api = {
-  async getMenu() {
+  async getMenu(onRetry) {
     if (USE_MOCK) { await sleep(300); return null; } // null → dùng STATIC_MENU
-    const res = await fetch(`${API_BASE}/menu`);
+    const res = await fetchWithRetry(`${API_BASE}/menu`, undefined, onRetry);
     if (!res.ok) throw new Error("Không tải được thực đơn");
     // returns: [{ menuItemId, name, price, category, imageUrl, isAvailable }]
     return res.json();
   },
 
-  async getOrderByTable(tableId) {
+  async getOrderByTable(tableId, onRetry) {
     if (USE_MOCK) { await sleep(200); return _mockOrder; }
-    const res = await fetch(`${API_BASE}/orders/table/${tableId}`);
+    const res = await fetchWithRetry(`${API_BASE}/orders/table/${tableId}`, undefined, onRetry);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error("Không tải được đơn");
     const data = await res.json();
@@ -71,7 +71,7 @@ const api = {
     return list.length > 0 ? normalizeOrder(list[0]) : null;
   },
 
-  async placeOrder(tableId, items, note) {
+  async placeOrder(tableId, items, note, onRetry) {
     if (USE_MOCK) {
       await sleep(900);
       const id = Math.floor(Math.random() * 9000) + 1000;
@@ -86,16 +86,16 @@ const api = {
       };
       return _mockOrder;
     }
-    const res = await fetch(`${API_BASE}/orders`, {
+    const res = await fetchWithRetry(`${API_BASE}/orders`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tableId, note, items }),
-    });
+    }, onRetry);
     if (!res.ok) throw new Error("Đặt món thất bại, thử lại nhé");
     return normalizeOrder(await res.json());
   },
 
-  async addItems(orderId, items, note) {
+  async addItems(orderId, items, note, onRetry) {
     if (USE_MOCK) {
       await sleep(700);
       if (_mockOrder) {
@@ -109,11 +109,11 @@ const api = {
       }
       return _mockOrder;
     }
-    const res = await fetch(`${API_BASE}/orders/${orderId}/items`, {
+    const res = await fetchWithRetry(`${API_BASE}/orders/${orderId}/items`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ note, items }),
-    });
+    }, onRetry);
     if (!res.ok) throw new Error("Gọi thêm thất bại, thử lại nhé");
     return normalizeOrder(await res.json());
   },
@@ -206,43 +206,65 @@ export default function App() {
   const [note, setNote]           = useState("");   // ghi chú chung cho cả đơn
   const [placed, setPlaced]       = useState(false);
 
-  const [tableId, setTableId]               = useState("?");
+  const [tableId] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("tableId") ?? "?";
+  });
   const [orderId, setOrderId]               = useState(null);
   const [orderStatus, setOrderStatus]       = useState(null);
   const [currentOrder, setCurrentOrder]     = useState(null);
   const [submitting, setSubmitting]         = useState(false);
+  const [submitMessage, setSubmitMessage]   = useState("");
   const [orderError, setOrderError]         = useState("");
   const [orderSheetOpen, setOrderSheetOpen] = useState(false);
   const [statusLoading, setStatusLoading]   = useState(false);
+  const [wasReorder, setWasReorder]         = useState(false);
 
-  // Nguồn dữ liệu menu: null = dùng STATIC fallback, có giá trị = từ API thật
+  // Nguồn dữ liệu menu: null = chưa có, có giá trị = từ API thật.
+  // STATIC_MENU chỉ dùng khi USE_MOCK=true — id của nó không khớp với
+  // menuItemId thật trên backend nên tuyệt đối không dùng làm fallback
+  // lúc gọi API thật, kẻo gửi nhầm món khi /menu load lỗi.
   const [apiMenu, setApiMenu]     = useState(null);
   const [apiCats, setApiCats]     = useState(null);
+  const [menuError, setMenuError] = useState(false);
 
   // Menu và categories đang hoạt động
-  const activeMenu       = apiMenu ?? STATIC_MENU;
-  const activeCategories = apiCats ?? STATIC_CATEGORIES;
+  const activeMenu = apiMenu ?? (USE_MOCK ? STATIC_MENU : []);
+  const activeCategories = useMemo(
+    () => apiCats ?? (USE_MOCK ? STATIC_CATEGORIES : []),
+    [apiCats]
+  );
+  const menuReady = USE_MOCK || apiMenu !== null;
 
   // Set các id không available (dùng Set để lookup O(1))
   const unavailableIds = apiMenu
     ? new Set(apiMenu.filter((i) => i.isAvailable === false).map((i) => i.id))
     : new Set();
 
-  const wasReorderRef = useRef(false);
-  const sectionRefs   = useRef({});
-  const tabsRef       = useRef(null);
-  const tabRefs       = useRef({});
+  const sectionRefs = useRef({});
+  const tabsRef     = useRef(null);
+  const tabRefs     = useRef({});
+
+  const loadMenu = useCallback(() => {
+    api.getMenu().then((items) => {
+      if (!items) return; // mock mode: dùng STATIC_MENU
+      const { menu, categories } = transformApiMenu(items);
+      setApiMenu(menu);
+      setApiCats(categories);
+      setMenuError(false);
+      if (categories.length > 0) setActiveCat(categories[0].id);
+    }).catch(() => setMenuError(true));
+  }, []);
+
+  const retryLoadMenu = () => { setMenuError(false); loadMenu(); };
 
   // ── On mount ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tid = params.get("tableId");
-    const resolvedId = tid ?? "?";
-    setTableId(resolvedId);
-
-    if (tid) {
-      api.getOrderByTable(tid).then((order) => {
-        if (order) {
+    if (tableId !== "?") {
+      api.getOrderByTable(tableId).then((order) => {
+        // Bàn có thể đã được khách trước dùng; chỉ nhận đơn còn hoạt động
+        // (status < 4 = chưa Hoàn thành/Đã huỷ), tránh "thừa kế" đơn cũ.
+        if (order && order.status < 4) {
           setOrderId(order.orderId);
           setOrderStatus(order.status);
           setCurrentOrder(order);
@@ -250,15 +272,8 @@ export default function App() {
       }).catch(() => {});
     }
 
-
-    api.getMenu().then((items) => {
-      if (!items) return; // mock mode: dùng STATIC_MENU
-      const { menu, categories } = transformApiMenu(items);
-      setApiMenu(menu);
-      setApiCats(categories);
-      if (categories.length > 0) setActiveCat(categories[0].id);
-    }).catch(() => {}); // lỗi → giữ nguyên STATIC fallback
-  }, []);
+    loadMenu();
+  }, [tableId, loadMenu]);
 
   const add = useCallback((id) => setCart((c) => ({ ...c, [id]: (c[id] || 0) + 1 })), []);
   const remove = useCallback((id) =>
@@ -293,7 +308,10 @@ export default function App() {
     );
     Object.values(sectionRefs.current).forEach((el) => el && obs.observe(el));
     return () => obs.disconnect();
-  }, [filtered]);
+    // activeCategories cần có trong deps: các section chỉ thực sự tồn tại
+    // trong DOM sau khi menu thật tải xong (trước đó activeCategories rỗng,
+    // không có gì để observe) — phải chạy lại effect khi danh sách đổi.
+  }, [filtered, activeCategories]);
 
   useEffect(() => {
     const tab = tabRefs.current[activeCat];
@@ -315,7 +333,7 @@ export default function App() {
     try {
       const order = await api.getOrderByTable(tableId);
       if (order) { setOrderStatus(order.status); setCurrentOrder(order); }
-    } catch (_) {
+    } catch {
       // silently ignore
     } finally {
       setStatusLoading(false);
@@ -324,8 +342,9 @@ export default function App() {
 
   const placeOrder = async () => {
     if (submitting) return;
-    wasReorderRef.current = !!orderId;
+    setWasReorder(!!orderId);
     setOrderError("");
+    setSubmitMessage("");
     setSubmitting(true);
     try {
       const items = Object.entries(cart).map(([id, q]) => {
@@ -339,9 +358,10 @@ export default function App() {
         };
       });
 
+      const onRetry = () => setSubmitMessage("Máy chủ đang khởi động lại, vui lòng đợi trong giây lát…");
       const result = orderId
-        ? await api.addItems(orderId, items, note)
-        : await api.placeOrder(tableId, items, note);
+        ? await api.addItems(orderId, items, note, onRetry)
+        : await api.placeOrder(tableId, items, note, onRetry);
 
       setOrderId(result.orderId);
       setOrderStatus(result.status);
@@ -355,6 +375,7 @@ export default function App() {
       setOrderError(err.message);
     } finally {
       setSubmitting(false);
+      setSubmitMessage("");
     }
   };
 
@@ -402,7 +423,7 @@ export default function App() {
       </header>
 
       {/* Category tabs */}
-      {!filtered && (
+      {!filtered && menuReady && activeCategories.length > 0 && (
         <nav
           className="sticky top-0 z-20 flex gap-2 overflow-x-auto px-[18px] py-[11px] bg-cream border-b border-line shadow-[0_4px_12px_rgba(58,42,30,0.05)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           ref={tabsRef}
@@ -427,7 +448,27 @@ export default function App() {
 
       {/* Menu sections */}
       <main className="px-[18px] pt-2 pb-[130px]">
-        {filtered ? (
+        {!menuReady ? (
+          <section className="pt-[70px] pb-[70px] text-center">
+            {menuError ? (
+              <>
+                <p className="text-[14.5px] text-brown-700 mb-4 leading-[1.55]">
+                  Không tải được thực đơn.<br />Vui lòng kiểm tra kết nối và thử lại.
+                </p>
+                <button
+                  className="bg-brown-900 text-tint text-[14.5px] font-semibold py-3 px-[22px] rounded-[12px] cursor-pointer"
+                  onClick={retryLoadMenu}
+                >
+                  Thử lại
+                </button>
+              </>
+            ) : (
+              <p className="text-[14.5px] text-muted flex items-center justify-center gap-2">
+                <Loader2 size={18} strokeWidth={2.4} className="animate-spin" /> Đang tải thực đơn…
+              </p>
+            )}
+          </section>
+        ) : filtered ? (
           <section className="pt-[18px]">
             <h2 className="font-lora text-[21px] font-semibold text-brown-900 mb-[13px]">
               Kết quả tìm kiếm{" "}
@@ -526,7 +567,7 @@ export default function App() {
                   <Check size={34} strokeWidth={3} />
                 </div>
                 <h3 className="font-lora text-[23px] text-brown-900 mb-2">
-                  {wasReorderRef.current ? "Đã gọi thêm thành công!" : "Đã gửi đơn tới quầy!"}
+                  {wasReorder ? "Đã gọi thêm thành công!" : "Đã gửi đơn tới quầy!"}
                 </h3>
                 <p className="text-[14.5px] text-brown-700 leading-[1.55]">
                   Món của bạn ở <strong>Bàn {tableId}</strong> đang được chuẩn bị. Cảm ơn bạn ✨
@@ -602,6 +643,9 @@ export default function App() {
                         />
                       </label>
 
+                      {submitMessage && !orderError && (
+                        <p className="text-[13px] text-brown-700 mt-2 text-center">{submitMessage}</p>
+                      )}
                       {orderError && (
                         <p className="text-[13px] text-red-500 mt-2 text-center">{orderError}</p>
                       )}
@@ -653,6 +697,7 @@ export default function App() {
       {/* Food detail modal */}
       {selectedFood && (
         <FoodDetailModal
+          key={selectedFood.id}
           item={selectedFood}
           onClose={() => setSelectedFood(null)}
           qty={cart[selectedFood.id] || 0}
@@ -665,17 +710,18 @@ export default function App() {
 }
 
 // ── ItemThumbnail: render ảnh từ imageUrl nếu có, fallback về emoji ────────────
+// Một số món từ BE trả imageUrl là đường dẫn cache nội bộ của app Android
+// (vd "/data/user/0/.../IMG_....jpg"), trình duyệt không tải được — phải có
+// fallback thay vì ẩn hẳn img để lại ô trống.
 function ItemThumbnail({ item, className = "w-full h-full object-cover" }) {
-  if (item.imageUrl) {
+  const [broken, setBroken] = useState(false);
+  if (item.imageUrl && !broken) {
     return (
       <img
         src={item.imageUrl}
         alt={item.name}
         className={className}
-        onError={(e) => {
-          // nếu ảnh lỗi, ẩn img và để background gradient hiện ra
-          e.currentTarget.style.display = "none";
-        }}
+        onError={() => setBroken(true)}
       />
     );
   }

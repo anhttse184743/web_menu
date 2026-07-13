@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Star, Plus, Minus, ShoppingBag } from 'lucide-react';
+import { fetchWithRetry } from './lib/fetchWithRetry';
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 const API_BASE = import.meta.env.VITE_API_GATEWAY ? `${import.meta.env.VITE_API_GATEWAY}/api` : "/api";
@@ -14,6 +15,8 @@ const MOCK_FEEDBACKS = [
 export default function FoodDetailModal({ item, onClose, qty = 0, onAdd, onRemove }) {
   const [feedbacks, setFeedbacks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [coverBroken, setCoverBroken] = useState(false);
 
   useEffect(() => {
     if (!item) return;
@@ -21,14 +24,18 @@ export default function FoodDetailModal({ item, onClose, qty = 0, onAdd, onRemov
       setTimeout(() => { setFeedbacks(MOCK_FEEDBACKS); setLoading(false); }, 300);
       return;
     }
-    fetch(`${API_BASE}/feedbacks/active`)
-      .then(res => res.json())
+    fetchWithRetry(`${API_BASE}/feedbacks/active`)
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to load feedbacks");
+        return res.json();
+      })
       .then(data => {
         setFeedbacks(data?.slice(0, 10) || []);
         setLoading(false);
       })
       .catch(err => {
         console.error("Failed to load feedbacks", err);
+        setError(true);
         setLoading(false);
       });
   }, [item]);
@@ -43,11 +50,11 @@ export default function FoodDetailModal({ item, onClose, qty = 0, onAdd, onRemov
       >
         {/* Cover image */}
         <div className="h-[250px] bg-tint-2 relative shrink-0">
-          <img 
-            src={item.imageUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=random`} 
-            alt={item.name} 
+          <img
+            src={item.imageUrl && !coverBroken ? item.imageUrl : `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=random`}
+            alt={item.name}
             className="w-full h-full object-cover"
-            onError={e => { e.target.style.display='none' }}
+            onError={() => setCoverBroken(true)}
           />
           <button 
             className="absolute top-4 right-4 bg-white/80 p-2 rounded-full cursor-pointer hover:bg-white"
@@ -73,6 +80,10 @@ export default function FoodDetailModal({ item, onClose, qty = 0, onAdd, onRemov
 
             {loading ? (
               <p className="text-center text-muted py-4">Đang tải đánh giá...</p>
+            ) : error ? (
+              <p className="text-[14px] text-red-500 text-center py-4 bg-tint rounded-[16px]">
+                Không tải được đánh giá. Vui lòng thử lại sau.
+              </p>
             ) : feedbacks.length > 0 ? (
               <div className="space-y-4">
                 {feedbacks.map((fb, idx) => (
