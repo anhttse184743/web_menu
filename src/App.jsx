@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue } from "react";
 import {
   Search, Plus, Minus, ShoppingBag, X, Check, Star,
   ChevronRight, Loader2, ClipboardList, RefreshCw,
@@ -292,8 +292,12 @@ export default function App() {
     return sum + (item ? item.price * q : 0);
   }, 0);
 
-  const filtered = query.trim()
-    ? activeMenu.filter((m) => m.name.toLowerCase().includes(query.trim().toLowerCase()))
+  // useDeferredValue: ô input luôn hiện ký tự ngay lập tức, còn việc lọc +
+  // render lại cả danh sách món (tốn hơn) được React trì hoãn vài mili giây
+  // để không làm giật lúc gõ nhanh.
+  const deferredQuery = useDeferredValue(query);
+  const filtered = deferredQuery.trim()
+    ? activeMenu.filter((m) => m.name.toLowerCase().includes(deferredQuery.trim().toLowerCase()))
     : null;
 
   useEffect(() => {
@@ -513,7 +517,7 @@ export default function App() {
         </div>
 
         <p className="text-center text-[12px] text-muted mt-7 leading-[1.6]">
-          Tiệm Mộc · 24 Trần Hưng Đạo, Q.1 · Mở cửa 7:00 – 22:00
+          Tiệm Mộc · Nhà văn hóa sinh viên · Mở cửa 7:00 – 22:00
         </p>
       </main>
 
