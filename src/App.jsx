@@ -359,8 +359,11 @@ export default function App() {
         };
       });
 
+      // Đơn cũ đã Hoàn thành/Đã huỷ (status >= 4) không thể gọi thêm món nữa —
+      // phải tạo đơn mới, dù orderId cũ vẫn còn trong state.
+      const canAddToExisting = orderId && orderStatus < 4;
       const onRetry = () => setSubmitMessage("Máy chủ đang khởi động lại, vui lòng đợi trong giây lát…");
-      const result = orderId
+      const result = canAddToExisting
         ? await api.addItems(orderId, items, note, onRetry)
         : await api.placeOrder(tableId, items, note, onRetry);
 
@@ -380,7 +383,7 @@ export default function App() {
     }
   };
 
-  const isReorder = !!orderId;
+  const isReorder = !!orderId && orderStatus < 4;
 
   return (
     <div className="font-vietnam text-text-main bg-cream max-w-[480px] mx-auto min-h-screen relative shadow-[0_0_60px_rgba(58,42,30,0.06)]">
