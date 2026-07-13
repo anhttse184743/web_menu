@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import FoodDetailModal from "./FoodDetailModal";
 import FeedbackForm from "./FeedbackForm";
+import FeedbackList from "./FeedbackList";
 import { sleep, fetchWithRetry } from "./lib/fetchWithRetry";
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -503,6 +504,11 @@ export default function App() {
             </section>
           ))
         )}
+        
+        <div className="mt-8 -mx-[18px]">
+          <FeedbackList />
+        </div>
+
         <p className="text-center text-[12px] text-muted mt-7 leading-[1.6]">
           Tiệm Mộc · 24 Trần Hưng Đạo, Q.1 · Mở cửa 7:00 – 22:00
         </p>
@@ -700,9 +706,23 @@ export default function App() {
           key={selectedFood.id}
           item={selectedFood}
           onClose={() => setSelectedFood(null)}
-          qty={cart[selectedFood.id] || 0}
-          onAdd={() => add(selectedFood.id)}
-          onRemove={() => remove(selectedFood.id)}
+          initialQty={cart[selectedFood.id] || 0}
+          initialNote={cartNotes[selectedFood.id] || ""}
+          onSave={(qty, note) => {
+            setCart(prev => {
+              const next = { ...prev };
+              if (qty <= 0) delete next[selectedFood.id];
+              else next[selectedFood.id] = qty;
+              return next;
+            });
+            setCartNotes(prev => {
+              const next = { ...prev };
+              if (note.trim() === "") delete next[selectedFood.id];
+              else next[selectedFood.id] = note;
+              return next;
+            });
+            setSelectedFood(null);
+          }}
         />
       )}
     </div>

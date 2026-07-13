@@ -14,6 +14,13 @@ export default function FeedbackForm({ orderId, tableId, onSubmitSuccess }) {
   const [retryMessage, setRetryMessage] = useState("");
 
   const handleSubmit = async () => {
+    const parsedOrderId = parseInt(orderId, 10);
+    const parsedTableId = parseInt(tableId, 10);
+    if (!Number.isInteger(parsedOrderId) || !Number.isInteger(parsedTableId)) {
+      setError("Không xác định được đơn hàng, vui lòng tải lại trang.");
+      return;
+    }
+
     setLoading(true);
     setError("");
     setRetryMessage("");
@@ -26,8 +33,8 @@ export default function FeedbackForm({ orderId, tableId, onSubmitSuccess }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            orderId: parseInt(orderId),
-            tableId: parseInt(tableId),
+            orderId: parsedOrderId,
+            tableId: parsedTableId,
             rating,
             comment,
           }),

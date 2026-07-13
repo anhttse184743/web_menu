@@ -1,151 +1,104 @@
-import { useState, useEffect } from 'react';
-import { X, Star, Plus, Minus, ShoppingBag } from 'lucide-react';
-import { fetchWithRetry } from './lib/fetchWithRetry';
+import { useState } from 'react';
+import { X, Plus, Minus } from 'lucide-react';
 
-const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
-const API_BASE = import.meta.env.VITE_API_GATEWAY ? `${import.meta.env.VITE_API_GATEWAY}/api` : "/api";
-
-const MOCK_FEEDBACKS = [
-  { rating: 5, tableId: 3, createdAt: "2025-06-20T10:00:00Z", comment: "Cà phê rất đậm, croissant giòn thơm. Sẽ quay lại!" },
-  { rating: 4, tableId: 1, createdAt: "2025-06-21T14:30:00Z", comment: "Không gian yên tĩnh, phục vụ nhanh. Tiramisu ngon lắm." },
-  { rating: 5, tableId: 7, createdAt: "2025-06-22T09:15:00Z", comment: "Bạc xỉu béo vừa phải, nhân viên dễ thương ✨" },
-  { rating: 3, tableId: 2, createdAt: "2025-06-22T16:45:00Z", comment: "Đồ uống ổn nhưng hơi lâu." },
-];
-
-export default function FoodDetailModal({ item, onClose, qty = 0, onAdd, onRemove }) {
-  const [feedbacks, setFeedbacks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+export default function FoodDetailModal({ item, onClose, initialQty = 0, initialNote = "", onSave }) {
+  const [qty, setQty] = useState(initialQty);
+  const [note, setNote] = useState(initialNote);
   const [coverBroken, setCoverBroken] = useState(false);
-
-  useEffect(() => {
-    if (!item) return;
-    if (USE_MOCK) {
-      setTimeout(() => { setFeedbacks(MOCK_FEEDBACKS); setLoading(false); }, 300);
-      return;
-    }
-    fetchWithRetry(`${API_BASE}/feedbacks/active`)
-      .then(res => {
-        if (!res.ok) throw new Error("Failed to load feedbacks");
-        return res.json();
-      })
-      .then(data => {
-        setFeedbacks(data?.slice(0, 10) || []);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error("Failed to load feedbacks", err);
-        setError(true);
-        setLoading(false);
-      });
-  }, [item]);
 
   if (!item) return null;
 
+  const handleAdd = () => setQty(q => q + 1);
+  const handleRemove = () => setQty(q => Math.max(0, q - 1));
+
   return (
-    <div className="fixed inset-0 z-[70] bg-[rgba(44,32,24,0.6)] flex items-end sm:items-center justify-center animate-fade" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-[rgba(44,32,24,0.6)] flex flex-col items-center justify-end sm:justify-center animate-fade" onClick={onClose}>
       <div 
-        className="w-full sm:w-[480px] bg-white rounded-t-[24px] sm:rounded-[24px] h-[85vh] sm:h-[80vh] flex flex-col relative overflow-hidden" 
+        className="w-full sm:w-[480px] bg-white rounded-t-[24px] sm:rounded-[24px] h-[92vh] sm:h-[85vh] flex flex-col relative overflow-hidden" 
         onClick={e => e.stopPropagation()}
       >
-        {/* Cover image */}
-        <div className="h-[250px] bg-tint-2 relative shrink-0">
-          <img
-            src={item.imageUrl && !coverBroken ? item.imageUrl : `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=random`}
-            alt={item.name}
-            className="w-full h-full object-cover"
-            onError={() => setCoverBroken(true)}
-          />
-          <button 
-            className="absolute top-4 right-4 bg-white/80 p-2 rounded-full cursor-pointer hover:bg-white"
+        {/* Top actions */}
+        <div className="absolute top-4 left-4 right-4 flex justify-start z-10 pointer-events-none">
+          <button
+            className="bg-white p-[10px] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.1)] pointer-events-auto cursor-pointer hover:bg-tint"
             onClick={onClose}
           >
-            <X size={20} className="text-brown-900" />
+            <X size={20} className="text-brown-900" strokeWidth={2.5} />
           </button>
         </div>
 
         {/* Info content */}
-        <div className="flex-1 overflow-y-auto p-5 pb-4">
-          <h2 className="text-[24px] font-bold text-brown-900 mb-2">{item.name}</h2>
-          <div className="text-[20px] font-lora font-bold text-accent mb-4">
-            {item.price.toLocaleString("vi-VN")}đ
+        <div className="flex-1 overflow-y-auto pb-[100px]">
+          {/* Cover image */}
+          <div className="h-[280px] sm:h-[320px] bg-white relative flex items-center justify-center p-6 border-b border-line">
+            <img
+              src={item.imageUrl && !coverBroken ? item.imageUrl : `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=random`}
+              alt={item.name}
+              className="w-full h-full object-contain rounded-full drop-shadow-xl"
+              onError={() => setCoverBroken(true)}
+            />
           </div>
-          <p className="text-[15px] text-brown-600 leading-[1.6] mb-8">
-            {item.desc || item.description || "Chưa có mô tả cho món ăn này."}
-          </p>
 
-          {/* Feedback section */}
-          <div className="pt-6 border-t border-line">
-            <h3 className="text-[18px] font-semibold text-brown-900 mb-4">Đánh giá nổi bật</h3>
-
-            {loading ? (
-              <p className="text-center text-muted py-4">Đang tải đánh giá...</p>
-            ) : error ? (
-              <p className="text-[14px] text-red-500 text-center py-4 bg-tint rounded-[16px]">
-                Không tải được đánh giá. Vui lòng thử lại sau.
-              </p>
-            ) : feedbacks.length > 0 ? (
-              <div className="space-y-4">
-                {feedbacks.map((fb, idx) => (
-                  <div key={idx} className="bg-tint rounded-[16px] p-4">
-                    <div className="flex items-center gap-1 mb-2">
-                      {[1, 2, 3, 4, 5].map(star => (
-                        <Star
-                          key={star}
-                          size={14}
-                          fill={star <= fb.rating ? "#EAB308" : "transparent"}
-                          color={star <= fb.rating ? "#EAB308" : "#ccc"}
-                        />
-                      ))}
-                      <span className="text-[12px] text-muted ml-2">
-                        Bàn {fb.tableId} • {new Date(fb.createdAt).toLocaleDateString("vi-VN")}
-                      </span>
-                    </div>
-                    <p className="text-[14px] text-brown-800">
-                      {fb.comment || "Không có nội dung đánh giá."}
-                    </p>
-                  </div>
-                ))}
+          <div className="px-5 pt-5 pb-6">
+            <div className="flex justify-between items-start gap-4 mb-1">
+              <h2 className="text-[22px] font-bold text-brown-900 leading-tight">
+                {item.name}
+              </h2>
+              <div className="text-[20px] font-lora font-bold text-brown-900 shrink-0">
+                {item.price.toLocaleString("vi-VN")}
               </div>
-            ) : (
-              <p className="text-[14px] text-muted text-center py-4 bg-tint rounded-[16px]">
-                Chưa có đánh giá nào.
-              </p>
-            )}
+            </div>
+            
+            {/* Category / desc */}
+            <p className="text-[14px] text-muted mb-6">
+              {item.desc || item.description || "Chưa có mô tả cho món ăn này."}
+            </p>
+
+            {/* Note section */}
+            <div className="border-t border-line pt-5">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-[17px] font-semibold text-brown-900">Thêm lưu ý cho quán</h3>
+                <span className="text-[12px] bg-tint text-brown-700 px-2 py-1 rounded-full font-medium">Không bắt buộc</span>
+              </div>
+              <textarea
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                placeholder="Việc thực hiện yêu cầu còn tùy thuộc vào khả năng của quán."
+                className="w-full border border-line rounded-[14px] p-4 text-[14px] text-brown-900 placeholder:text-muted outline-none focus:border-accent resize-none min-h-[90px]"
+              />
+            </div>
+            
+            {/* Quantity selector */}
+            <div className="flex items-center justify-center gap-6 mt-8 mb-4">
+              <button
+                className={`w-[38px] h-[38px] rounded-full flex items-center justify-center text-brown-900 cursor-pointer active:scale-95 transition-transform ${qty === 0 ? 'bg-tint opacity-50 cursor-not-allowed' : 'bg-tint-2 hover:bg-[#e0d6cd]'}`}
+                onClick={handleRemove}
+                disabled={qty === 0}
+              >
+                <Minus size={20} strokeWidth={2.5} />
+              </button>
+              <span className="text-[20px] font-semibold text-brown-900 min-w-[30px] text-center">{qty}</span>
+              <button
+                className="w-[38px] h-[38px] rounded-full bg-tint-2 hover:bg-[#e0d6cd] flex items-center justify-center text-brown-900 cursor-pointer active:scale-95 transition-transform"
+                onClick={handleAdd}
+              >
+                <Plus size={20} strokeWidth={2.5} />
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Footer: add to cart */}
-        <div className="px-5 py-4 bg-white border-t border-line flex items-center justify-between gap-3">
-          <span className="font-lora text-[22px] font-bold text-brown-900">
-            {item.price.toLocaleString("vi-VN")}đ
-          </span>
-          {qty === 0 ? (
-            <button
-              className="flex items-center gap-2 bg-brown-900 text-tint text-[15px] font-semibold px-5 py-3 rounded-[14px] hover:bg-brown-700 active:scale-[0.97] transition-all cursor-pointer"
-              onClick={onAdd}
-            >
-              <ShoppingBag size={18} strokeWidth={2.2} /> Thêm vào giỏ
-            </button>
-          ) : (
-            <div className="flex items-center gap-1 bg-brown-900 rounded-[14px] p-[5px]">
-              <button
-                className="w-9 h-9 rounded-[10px] grid place-items-center text-tint hover:bg-white/14 transition-colors cursor-pointer"
-                onClick={onRemove}
-                aria-label="Bớt"
-              >
-                <Minus size={17} strokeWidth={2.6} />
-              </button>
-              <span className="min-w-[28px] text-center font-semibold text-[15px] text-tint">{qty}</span>
-              <button
-                className="w-9 h-9 rounded-[10px] grid place-items-center text-tint hover:bg-white/14 transition-colors cursor-pointer"
-                onClick={onAdd}
-                aria-label="Thêm"
-              >
-                <Plus size={17} strokeWidth={2.6} />
-              </button>
-            </div>
-          )}
+        {/* Bottom fixed footer */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-line shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+           <button
+             className="w-full bg-brown-900 text-tint text-[16px] font-semibold py-[14px] rounded-[14px] cursor-pointer hover:bg-brown-800 active:scale-[0.98] transition-all flex items-center justify-center disabled:opacity-50"
+             onClick={() => onSave(qty, note)}
+           >
+             {qty > 0 
+               ? `${initialQty > 0 ? 'Cập nhật' : 'Thêm vào'} giỏ hàng - ${(item.price * qty).toLocaleString("vi-VN")}`
+               : (initialQty > 0 ? 'Cập nhật giỏ hàng (Xoá món)' : 'Đóng')
+             }
+           </button>
         </div>
       </div>
     </div>
