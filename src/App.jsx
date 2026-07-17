@@ -242,9 +242,10 @@ export default function App() {
     ? new Set(apiMenu.filter((i) => i.isAvailable === false).map((i) => i.id))
     : new Set();
 
-  const sectionRefs = useRef({});
-  const tabsRef     = useRef(null);
-  const tabRefs     = useRef({});
+  const sectionRefs     = useRef({});
+  const tabsRef         = useRef(null);
+  const tabRefs         = useRef({});
+  const isRefreshingRef = useRef(false);
 
   const loadMenu = useCallback(() => {
     api.getMenu().then((items) => {
@@ -334,6 +335,8 @@ export default function App() {
 
   const refreshOrderStatus = useCallback(async () => {
     if (!tableId || tableId === "?") return;
+    if (isRefreshingRef.current) return; // request trước chưa xong (vd. đang retry cold-start) → bỏ qua lượt này
+    isRefreshingRef.current = true;
     setStatusLoading(true);
     try {
       const order = await api.getOrderByTable(tableId);
@@ -342,8 +345,21 @@ export default function App() {
       // silently ignore
     } finally {
       setStatusLoading(false);
+      isRefreshingRef.current = false;
     }
   }, [tableId]);
+
+  // Tự động cập nhật trạng thái đơn (khách không cần bấm refresh liên tục để
+  // bắt lúc chuyển "Hoàn thành" sau thanh toán). Dừng hẳn khi đơn đã kết thúc
+  // (status 4 = Hoàn thành, 5 = Đã huỷ) để không tốn request vô ích.
+  useEffect(() => {
+    if (!orderId || orderStatus === null || orderStatus >= 4) return;
+    const interval = setInterval(() => {
+      if (document.hidden) return; // tab bị ẩn → bỏ qua lượt poll này
+      refreshOrderStatus();
+    }, 7000);
+    return () => clearInterval(interval);
+  }, [orderId, orderStatus, refreshOrderStatus]);
 
   const placeOrder = async () => {
     if (submitting) return;
