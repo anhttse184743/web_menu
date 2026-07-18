@@ -924,7 +924,14 @@ function OrderSheet({ tableId, order, orderStatus, statusLoading, menuData, onCl
                     }
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[14px] font-semibold text-brown-900 truncate">{displayName}</p>
+                    <div className="flex items-center gap-[6px] flex-wrap">
+                      <p className="text-[14px] font-semibold text-brown-900 truncate">{displayName}</p>
+                      {orderItem.statusLabel && (
+                        <span className="shrink-0 text-[10.5px] font-medium text-brown-700 bg-tint px-[7px] py-[1px] rounded-full">
+                          {orderItem.statusLabel}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[12.5px] text-muted">
                       {formatVND(orderItem.unitPrice)} × {orderItem.quantity}
                     </p>
