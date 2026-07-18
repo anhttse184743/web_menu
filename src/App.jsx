@@ -42,6 +42,7 @@ function normalizeOrder(raw) {
     totalAmount: o.totalAmount ?? o.TotalAmount ?? 0,
     note:        o.note        ?? o.Note        ?? "",
     createdAt:   o.createdAt   ?? o.CreatedAt   ?? null,
+    publicToken: o.publicToken ?? o.PublicToken ?? null,
     items: (o.items ?? o.Items ?? []).map((item) => ({
       orderItemId:  item.orderItemId  ?? item.OrderItemId,
       menuItemId:   item.menuItemId   ?? item.MenuItemId,
@@ -49,6 +50,8 @@ function normalizeOrder(raw) {
       quantity:     item.quantity     ?? item.Quantity     ?? 0,
       unitPrice:    item.unitPrice    ?? item.UnitPrice    ?? 0,
       note:         item.note         ?? item.Note         ?? "",
+      createdAt:    item.createdAt    ?? item.CreatedAt    ?? null,
+      statusLabel:  item.statusLabel  ?? item.StatusLabel  ?? "",
     })),
   };
 }
@@ -70,6 +73,28 @@ const api = {
     const data = await res.json();
     const list = Array.isArray(data) ? data : [data];
     return list.length > 0 ? normalizeOrder(list[0]) : null;
+  },
+
+  // Endpoint nhẹ, tra theo orderId + token riêng của đơn (không lọc theo status
+  // như getOrderByTable) — dùng để poll phát hiện lúc đơn chuyển Hoàn thành sau
+  // khi thanh toán. token bắt buộc — không có/sai token thì BE trả 404.
+  async getOrderStatus(orderId, token, onRetry) {
+    if (USE_MOCK) {
+      await sleep(150);
+      return _mockOrder && _mockOrder.orderId === orderId
+        ? { orderId, status: _mockOrder.status, statusLabel: _mockOrder.statusLabel }
+        : null;
+    }
+    if (!token) return null;
+    const res = await fetchWithRetry(`${API_BASE}/orders/${orderId}/status?token=${encodeURIComponent(token)}`, undefined, onRetry);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error("Không tải được trạng thái đơn");
+    const o = await res.json();
+    return {
+      orderId:     o.orderId     ?? o.OrderId,
+      status:      o.status      ?? o.Status,
+      statusLabel: o.statusLabel ?? o.StatusLabel ?? "",
+    };
   },
 
   async placeOrder(tableId, items, note, onRetry) {
@@ -96,7 +121,7 @@ const api = {
     return normalizeOrder(await res.json());
   },
 
-  async addItems(orderId, items, note, onRetry) {
+  async addItems(orderId, token, items, note, onRetry) {
     if (USE_MOCK) {
       await sleep(700);
       if (_mockOrder) {
@@ -110,7 +135,7 @@ const api = {
       }
       return _mockOrder;
     }
-    const res = await fetchWithRetry(`${API_BASE}/orders/${orderId}/items`, {
+    const res = await fetchWithRetry(`${API_BASE}/orders/${orderId}/items?token=${encodeURIComponent(token ?? "")}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ note, items }),
@@ -196,6 +221,23 @@ function transformApiMenu(apiItems) {
 
 const formatVND = (n) => n.toLocaleString("vi-VN") + "đ";
 
+// Khoá localStorage riêng theo bàn — tránh khách bàn khác dùng chung máy/tab bị dính đơn lạ.
+// Lưu cả orderId lẫn publicToken (cần token để gọi getOrderStatus).
+const orderStorageKey = (tableId) => `order:${tableId}`;
+const saveOrderRef = (tableId, orderId, token) => {
+  localStorage.setItem(orderStorageKey(tableId), JSON.stringify({ orderId, token }));
+};
+const loadOrderRef = (tableId) => {
+  try {
+    const raw = localStorage.getItem(orderStorageKey(tableId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && parsed.orderId && parsed.token ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [selectedFood, setSelectedFood] = useState(null);
@@ -212,6 +254,7 @@ export default function App() {
     return params.get("tableId") ?? "?";
   });
   const [orderId, setOrderId]               = useState(null);
+  const [orderToken, setOrderToken]         = useState(null);
   const [orderStatus, setOrderStatus]       = useState(null);
   const [currentOrder, setCurrentOrder]     = useState(null);
   const [submitting, setSubmitting]         = useState(false);
@@ -263,15 +306,44 @@ export default function App() {
   // ── On mount ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (tableId !== "?") {
-      api.getOrderByTable(tableId).then((order) => {
-        // Bàn có thể đã được khách trước dùng; chỉ nhận đơn còn hoạt động
-        // (status < 4 = chưa Hoàn thành/Đã huỷ), tránh "thừa kế" đơn cũ.
-        if (order && order.status < 4) {
-          setOrderId(order.orderId);
-          setOrderStatus(order.status);
-          setCurrentOrder(order);
-        }
-      }).catch(() => {});
+      const savedRef = loadOrderRef(tableId);
+      if (savedRef) {
+        // Đơn do chính máy này đặt trên bàn này — tra thẳng theo orderId+token
+        // (không lọc theo status như getOrderByTable) để khôi phục đúng kể cả
+        // khi reload trang sau khi đơn đã chuyển Hoàn thành.
+        api.getOrderStatus(savedRef.orderId, savedRef.token).then((status) => {
+          if (!status) return; // đơn không còn tồn tại / token sai → coi như chưa có đơn
+          setOrderId(status.orderId);
+          setOrderToken(savedRef.token);
+          setOrderStatus(status.status);
+          if (status.status < 4) {
+            // đơn còn active — lấy đầy đủ items qua getOrderByTable như cũ.
+            // getOrderByTable trả đơn MỚI NHẤT của cả bàn (không khoá theo
+            // orderId) — chỉ nhận nếu đúng là đơn của mình, tránh hiện nhầm
+            // đơn của khách khác đang active cùng bàn.
+            api.getOrderByTable(tableId).then((order) => {
+              if (order && order.orderId === status.orderId) setCurrentOrder(order);
+            }).catch(() => {});
+          } else {
+            setCurrentOrder({
+              orderId: status.orderId, tableId: Number(tableId),
+              status: status.status, statusLabel: status.statusLabel,
+              items: [], totalAmount: 0,
+            });
+          }
+        }).catch(() => {});
+      } else {
+        api.getOrderByTable(tableId).then((order) => {
+          // Bàn có thể đã được khách trước dùng; chỉ nhận đơn còn hoạt động
+          // (status < 4 = chưa Hoàn thành/Đã huỷ), tránh "thừa kế" đơn cũ.
+          if (order && order.status < 4) {
+            setOrderId(order.orderId);
+            setOrderToken(order.publicToken);
+            setOrderStatus(order.status);
+            setCurrentOrder(order);
+          }
+        }).catch(() => {});
+      }
     }
 
     loadMenu();
@@ -334,20 +406,40 @@ export default function App() {
   };
 
   const refreshOrderStatus = useCallback(async () => {
-    if (!tableId || tableId === "?") return;
+    if (!orderId) return;
     if (isRefreshingRef.current) return; // request trước chưa xong (vd. đang retry cold-start) → bỏ qua lượt này
     isRefreshingRef.current = true;
     setStatusLoading(true);
     try {
+      // Ưu tiên getOrderByTable — trả full data (items/totalAmount) trong lúc
+      // đơn còn active (Status < 4), giữ sheet luôn đồng bộ nếu có người khác
+      // cùng bàn gọi thêm món song song. getOrderByTable trả đơn MỚI NHẤT của cả
+      // bàn (không khoá theo orderId) — nếu bàn có khách khác vừa đặt đơn mới,
+      // phải bỏ qua kết quả đó (không phải đơn của mình) để tránh hiện nhầm
+      // món/tổng tiền của khách khác.
       const order = await api.getOrderByTable(tableId);
-      if (order) { setOrderStatus(order.status); setCurrentOrder(order); }
+      if (order && order.orderId === orderId) {
+        setOrderStatus(order.status);
+        setCurrentOrder(order);
+        return;
+      }
+      // getOrderByTable trả rỗng (đơn vừa Hoàn thành nên bị lọc mất Status < 4)
+      // hoặc trả đơn của khách khác cùng bàn — tra thẳng theo orderId+token của
+      // chính mình để luôn đúng, không bị ảnh hưởng bởi đơn khác trên cùng bàn.
+      const status = await api.getOrderStatus(orderId, orderToken);
+      if (status) {
+        setOrderStatus(status.status);
+        setCurrentOrder((prev) => prev
+          ? { ...prev, status: status.status, statusLabel: status.statusLabel }
+          : prev);
+      }
     } catch {
       // silently ignore
     } finally {
       setStatusLoading(false);
       isRefreshingRef.current = false;
     }
-  }, [tableId]);
+  }, [orderId, orderToken, tableId]);
 
   // Tự động cập nhật trạng thái đơn (khách không cần bấm refresh liên tục để
   // bắt lúc chuyển "Hoàn thành" sau thanh toán). Dừng hẳn khi đơn đã kết thúc
@@ -384,12 +476,14 @@ export default function App() {
       const canAddToExisting = orderId && orderStatus < 4;
       const onRetry = () => setSubmitMessage("Máy chủ đang khởi động lại, vui lòng đợi trong giây lát…");
       const result = canAddToExisting
-        ? await api.addItems(orderId, items, note, onRetry)
+        ? await api.addItems(orderId, orderToken, items, note, onRetry)
         : await api.placeOrder(tableId, items, note, onRetry);
 
       setOrderId(result.orderId);
+      setOrderToken(result.publicToken);
       setOrderStatus(result.status);
       setCurrentOrder(result);
+      if (tableId !== "?") saveOrderRef(tableId, result.orderId, result.publicToken);
       setPlaced(true);
       setCart({});
       setCartNotes({});
