@@ -71,7 +71,7 @@ export default function ChatBot() {
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-full max-w-[480px] h-[78vh] bg-cream rounded-t-[24px] flex flex-col overflow-hidden animate-slide-up"
+            className="w-full max-w-[480px] h-[78vh] bg-cream rounded-t-[24px] flex flex-col overflow-hidden animate-sheet-up"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-[18px] py-[14px] border-b border-line bg-white shrink-0">
