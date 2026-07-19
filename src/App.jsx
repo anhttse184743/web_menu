@@ -635,7 +635,7 @@ export default function App() {
       {/* Floating cart bar */}
       {count > 0 && !cartOpen && (
         <button
-          className="fixed bottom-[18px] left-1/2 -translate-x-1/2 w-[calc(100%-36px)] max-w-[444px] z-[45] flex items-center justify-between bg-brown-900 text-tint px-4 py-[14px] rounded-[16px] shadow-[0_12px_30px_rgba(58,42,30,0.34)] animate-slide-up font-vietnam cursor-pointer"
+          className="fixed bottom-[18px] left-[18px] right-[18px] max-w-[444px] mx-auto z-[45] flex items-center justify-between bg-brown-900 text-tint px-4 py-[14px] rounded-[16px] shadow-[0_12px_30px_rgba(58,42,30,0.34)] animate-sheet-up font-vietnam cursor-pointer"
           onClick={() => setCartOpen(true)}
         >
           <span className="flex items-center gap-[11px] text-[15px] font-semibold">
