@@ -6,6 +6,7 @@ import {
 import FoodDetailModal from "./FoodDetailModal";
 import FeedbackForm from "./FeedbackForm";
 import FeedbackList from "./FeedbackList";
+import ChatBot from "./ChatBot";
 import { sleep, fetchWithRetry } from "./lib/fetchWithRetry";
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -842,6 +843,8 @@ export default function App() {
           }}
         />
       )}
+
+      <ChatBot />
     </div>
   );
 }
